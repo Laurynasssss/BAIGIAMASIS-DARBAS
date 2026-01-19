@@ -1,0 +1,19 @@
+{
+  "name": "testapp",
+  "version": "1.0.0",
+  "description": "Playwright sample app for test healer",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test",
+    "serve": "http-server . -p 3000"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^25.0.6",
+    "http-server": "^14.1.1"
+  }
+}

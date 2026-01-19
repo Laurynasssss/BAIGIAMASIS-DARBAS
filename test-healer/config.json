@@ -1,0 +1,10 @@
+{
+  "artifacts": {
+    "failuresDir": "artifacts/failures",
+    "testResultsDir": "artifacts/test-results"
+  },
+  "healing": {
+    "defaultScope": "apps/testapp/tests",
+    "minConfidence": 0.75
+  }
+}

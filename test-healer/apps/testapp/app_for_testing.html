@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>AI Test Healer Playground</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, Arial, sans-serif;
+      background: #f5f5f5;
+      padding: 40px;
+    }
+    .card {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      max-width: 420px;
+      margin-bottom: 24px;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+    }
+    button {
+      margin-top: 16px;
+      padding: 10px 16px;
+      border-radius: 8px;
+      border: none;
+      background: #2563eb;
+      color: white;
+      cursor: pointer;
+    }
+    .secondary {
+      background: #6b7280;
+    }
+    #login-message {
+      margin-top: 12px;
+      font-weight: bold;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-content {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- LOGIN CARD -->
+  <div class="card" id="login-card">
+    <h2>Sign in</h2>
+
+    <label>Email</label>
+    <input id="email-input" type="email" />
+
+    <label>Password</label>
+    <input id="password-input" type="password" />
+
+    <button id="login-btn" class="login-button">Sign in</button>
+
+    <p id="login-message"></p>
+  </div>
+
+  <!-- SEARCH CARD -->
+  <div class="card" id="search-card">
+    <h2>Movie Search</h2>
+    <input id="search-input" placeholder="Search movie" />
+    <button id="search-btn">Search</button>
+
+    <!-- Deliberately renamed so tests need healing -->
+    <ul id="search-results-list"></ul>
+  </div>
+
+  <!-- MODAL -->
+  <div class="modal" id="info-modal">
+    <div class="modal-content">
+      <p>This is a modal dialog</p>
+      <button id="close-modal" class="secondary">Close</button>
+    </div>
+  </div>
+
+  <button id="open-modal">Open Modal</button>
+
+  <script>
+    // LOGIN LOGIC (LONGER DELAY)
+    document.querySelector('.login-button').addEventListener('click', () => {
+      const email = document.getElementById('email-input').value;
+      const password = document.getElementById('password-input').value;
+
+      setTimeout(() => {
+        if (email === 'test@test.com' && password === '1234') {
+          document.getElementById('login-message').textContent = 'Login successful';
+        } else {
+          document.getElementById('login-message').textContent = 'Invalid credentials';
+        }
+      }, 2000); // increased delay
+    });
+
+    // SEARCH LOGIC
+    document.getElementById('search-btn').addEventListener('click', () => {
+      const query = document.getElementById('search-input').value;
+      const results = document.getElementById('search-results-list');
+      results.innerHTML = '';
+
+      setTimeout(() => {
+        if (query) {
+          const li = document.createElement('li');
+          li.textContent = `Result for "${query}"`;
+          results.appendChild(li);
+        }
+      }, 500);
+    });
+
+    // MODAL LOGIC
+    document.getElementById('open-modal').addEventListener('click', () => {
+      document.getElementById('info-modal').style.display = 'flex';
+    });
+
+    document.getElementById('close-modal').addEventListener('click', () => {
+      document.getElementById('info-modal').style.display = 'none';
+    });
+  </script>
+
+</body>
+</html>
