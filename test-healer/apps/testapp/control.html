@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Healer Control Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+    .panel { max-width: 960px; margin: 0 auto; background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+    h1 { margin-top: 0; color: #fbbf24; }
+    button { background: #2563eb; color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font-size: 14px; cursor: pointer; margin: 6px 6px 6px 0; }
+    button.secondary { background: #6b7280; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .row { margin-bottom: 12px; }
+    .status { font-weight: 700; }
+    .status.ok { color: #10b981; }
+    .status.fail { color: #f87171; }
+    pre { background: #0b1222; color: #e2e8f0; border: 1px solid #1f2937; padding: 12px; border-radius: 8px; max-height: 340px; overflow: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Healer Control Panel</h1>
+    <p>Run Playwright tests and healing steps from the browser. The server executes commands; keep this tab open.</p>
+
+    <div class="row">
+      <button data-action="run-tests">Run Tests</button>
+      <span id="status-tests" class="status"></span>
+    </div>
+
+    <div class="row">
+      <button data-action="heal">Run Classifier (heal)</button>
+      <span id="status-heal" class="status"></span>
+    </div>
+
+    <div class="row">
+      <button data-action="apply">Apply Healing</button>
+      <button data-action="apply-dry" class="secondary">Apply Healing (dry-run)</button>
+      <span id="status-apply" class="status"></span>
+    </div>
+
+    <div class="row">
+      <strong>Preview (dry-run output):</strong>
+      <pre id="preview" style="margin-top:8px; max-height:200px;"></pre>
+    </div>
+
+    <div class="row">
+      <button data-action="clear" class="secondary">Clear Output</button>
+    </div>
+
+    <pre id="log"></pre>
+  </div>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const statusEls = {
+      tests: document.getElementById('status-tests'),
+      heal: document.getElementById('status-heal'),
+      apply: document.getElementById('status-apply'),
+    };
+    const previewEl = document.getElementById('preview');
+
+    const actions = {
+      'run-tests': { url: '/api/run-tests', status: 'tests' },
+      'heal': { url: '/api/heal', status: 'heal' },
+      'apply': { url: '/api/apply-heal', status: 'apply', confirm: true },
+      'apply-dry': { url: '/api/apply-heal-dry', status: 'apply', preview: true },
+    };
+
+    function appendLog(label, result) {
+      const time = new Date().toLocaleTimeString();
+      logEl.textContent = `${time} - ${label}\ncode: ${result.code}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}\n\n${logEl.textContent}`;
+    }
+
+    function setStatus(which, ok) {
+      if (!statusEls[which]) return;
+      statusEls[which].textContent = ok ? 'OK' : 'Failed';
+      statusEls[which].className = 'status ' + (ok ? 'ok' : 'fail');
+    }
+
+    async function callAction(key, button) {
+      const action = actions[key];
+      if (!action) return;
+      if (action.confirm) {
+        const proceed = window.confirm('Apply healing changes now? Make sure you reviewed the dry-run preview.');
+        if (!proceed) return;
+      }
+      button.disabled = true;
+      setStatus(action.status, null);
+      appendLog(action.status, { code: 'running', stdout: '', stderr: '' });
+      try {
+        const res = await fetch(action.url, { method: 'POST' });
+        const data = await res.json();
+        setStatus(action.status, data.ok);
+        appendLog(action.status, data);
+        if (action.preview) {
+          previewEl.textContent = (data.stdout || data.stderr || '').trim();
+        }
+      } catch (err) {
+        setStatus(action.status, false);
+        appendLog(action.status, { code: 'error', stdout: '', stderr: err.message || String(err) });
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    document.querySelectorAll('button[data-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-action');
+        if (key === 'clear') {
+          logEl.textContent = '';
+          Object.values(statusEls).forEach((el) => { el.textContent = ''; el.className = 'status'; });
+          previewEl.textContent = '';
+          return;
+        }
+        callAction(key, btn);
+      });
+    });
+  </script>
+</body>
+</html>

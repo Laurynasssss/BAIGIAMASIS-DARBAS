@@ -107,13 +107,19 @@
       const results = document.getElementById('search-results-list');
       results.innerHTML = '';
 
+      const status = document.createElement('li');
+      status.textContent = 'Loading (simulated slow search)...';
+      results.appendChild(status);
+
+      // Intentionally slow to trigger timeout in tests before healing.
       setTimeout(() => {
+        results.innerHTML = '';
         if (query) {
           const li = document.createElement('li');
           li.textContent = `Result for "${query}"`;
           results.appendChild(li);
         }
-      }, 500);
+      }, 7000);
     });
 
     // MODAL LOGIC

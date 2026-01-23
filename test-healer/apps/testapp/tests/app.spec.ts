@@ -5,17 +5,17 @@ test.afterEach(async ({ page }, testInfo) => {
   await captureFailure(page, testInfo);
 });
 
-test.describe('AI Test Healer Playground', () => {
-  test('successful login', async ({ page }) => {
-    await page.goto('/app_for_testing.html');
+  test.describe('AI Test Healer Playground', () => {
+    test('successful login', async ({ page }) => {
+      await page.goto('/app_for_testing.html');
 
-    await page.fill('#email-input', 'test@test.com');
-    await page.fill('#password-input', '1234');
+      await page.fill('#email-input', 'test@test.com');
+      await page.fill('#password-input', '1234');
 
-    await page.click('#login-btn');
+      await page.click('#login-btn');
 
-    await expect(page.locator('#login-message')).toHaveText('Login successful');
-  });
+      await expect(page.locator('#login-message')).toHaveText('Login successful');
+    });
 
   test('failed login shows error', async ({ page }) => {
     await page.goto('/app_for_testing.html');

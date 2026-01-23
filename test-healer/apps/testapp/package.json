@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "playwright test",
-    "serve": "http-server . -p 3000"
+    "serve": "http-server . -p 3000",
+    "control": "node controlServer.js"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +15,7 @@
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@types/node": "^25.0.6",
-    "http-server": "^14.1.1"
+    "http-server": "^14.1.1",
+    "express": "^4.19.2"
   }
 }

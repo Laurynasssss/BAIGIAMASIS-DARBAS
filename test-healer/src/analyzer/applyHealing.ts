@@ -11,6 +11,7 @@ type Healing = {
 type Classification = {
   failureType?: string;
   healing?: Healing;
+  timeoutFix?: { timeoutMs: number; reason?: string };
   testName?: string;
   [key: string]: unknown;
 };
@@ -112,22 +113,37 @@ function* walk(dir: string): Generator<string> {
 function collectSuggestions(): Suggestion[] {
   const suggestions: Suggestion[] = [];
 
+  const timeoutFixes: Array<{ timeoutMs: number; sourceFile: string }> = [];
+
   for (const root of classificationDirs) {
     for (const file of walk(root)) {
       if (!file.endsWith('classification.json')) continue;
       const json = readJsonSafe<Classification>(file);
-      if (!json || !json.healing) continue;
-      const { originalSelector, suggestedSelector, confidence } = json.healing;
-      if (!originalSelector || !suggestedSelector) continue;
-      if (confidence < minConfidence) continue;
+      if (!json) continue;
 
-      suggestions.push({
-        from: originalSelector,
-        to: suggestedSelector,
-        confidence,
-        sourceFile: file,
-      });
+      if (json.timeoutFix?.timeoutMs) {
+        timeoutFixes.push({ timeoutMs: json.timeoutFix.timeoutMs, sourceFile: file });
+      }
+
+      if (json.healing) {
+        const { originalSelector, suggestedSelector, confidence } = json.healing;
+        if (!originalSelector || !suggestedSelector) continue;
+        if (confidence < minConfidence) continue;
+
+        suggestions.push({
+          from: originalSelector,
+          to: suggestedSelector,
+          confidence,
+          sourceFile: file,
+        });
+      }
     }
+  }
+
+  // If any timeout fixes exist, store the max timeout as a synthetic suggestion keyed by empty selector.
+  if (timeoutFixes.length) {
+    const maxTimeout = Math.max(...timeoutFixes.map(t => t.timeoutMs));
+    (suggestions as any).timeoutFixMs = maxTimeout;
   }
 
   return suggestions;
@@ -185,9 +201,10 @@ function main(): void {
   console.log(`[applyHealing] minConfidence=${minConfidence} dryRun=${isDryRun}`);
 
   const suggestions = collectSuggestions();
+  const timeoutFixMs = (suggestions as any).timeoutFixMs as number | undefined;
   if (suggestions.length === 0) {
     console.log('No applicable healing suggestions found.');
-    return;
+    if (!timeoutFixMs) return;
   }
 
   const bestByFrom = new Map<string, Suggestion>();
@@ -220,11 +237,51 @@ function main(): void {
   }
 
   console.log(`Done. Files changed: ${totalFilesChanged}, total replacements: ${totalReplacements}`);
+  if (timeoutFixMs) {
+    const timeoutChanges = applyTimeoutFixes(codeFiles, timeoutFixMs);
+    totalFilesChanged += timeoutChanges.filesChanged;
+    console.log(`Timeout fixes applied to ${timeoutChanges.filesChanged} files (timeout ${timeoutFixMs} ms)`);
+  }
   if (isDryRun) {
     console.log('Dry-run mode: no files were written. Re-run without --dry-run to apply changes.');
   } else {
     console.log('Backups (*.bak) created next to modified files.');
   }
+}
+
+function applyTimeoutFixes(files: string[], timeoutMs: number): { filesChanged: number } {
+  let filesChanged = 0;
+
+  for (const file of files) {
+    let content = fs.readFileSync(file, 'utf8');
+    let changed = false;
+
+    if (!/test\.setTimeout\s*\(/.test(content)) {
+      const lines = content.split(/\r?\n/);
+      let insertAt = 0;
+      while (insertAt < lines.length && /^import\s/.test(lines[insertAt])) insertAt += 1;
+      lines.splice(insertAt, 0, `test.setTimeout(${timeoutMs});`);
+      content = lines.join('\n');
+      changed = true;
+    }
+
+    // Add timeout option to simple toHaveText/toContainText calls without options
+    const expectRx = /to(Have|Contain)Text\(([^,()]+)\)/g;
+    if (expectRx.test(content)) {
+      content = content.replace(expectRx, (_m, kind, arg1) => `to${kind}Text(${arg1}, { timeout: ${timeoutMs} })`);
+      changed = true;
+    }
+
+    if (changed && !isDryRun) {
+      fs.writeFileSync(`${file}.bak`, content);
+      fs.writeFileSync(file, content, 'utf8');
+      filesChanged += 1;
+    } else if (changed) {
+      filesChanged += 1;
+    }
+  }
+
+  return { filesChanged };
 }
 
 main();

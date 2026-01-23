@@ -83,6 +83,14 @@ function runClassifier(): void {
         const errorText = parsed.error || parsed.stack || '';
         const classification = classifyFailure(errorText, hint);
 
+        // If this is a timeout, attach a default healing hint to increase timeouts in tests.
+        if (classification.failureType === 'TIMEOUT') {
+          (classification as any).timeoutFix = {
+            timeoutMs: 15000,
+            reason: 'Increase test and expect timeouts for slow UI responses',
+          };
+        }
+
         if (classification.failureType === 'SELECTOR_NOT_FOUND') {
           const domPath = path.join(runDir, 'dom.html');
           const missingSelectors = extractMissingSelectors(errorText);
