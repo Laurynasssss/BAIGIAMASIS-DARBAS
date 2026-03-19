@@ -123,8 +123,12 @@ export function findNewSelector(
   scanAttribute($, 'id', normalizedMissing, tokens, context, candidates, value => `#${value}`);
   scanAttribute($, 'name', normalizedMissing, tokens, context, candidates, value => `[name="${value}"]`);
   scanAttribute($, 'aria-label', normalizedMissing, tokens, context, candidates, value => `[aria-label="${value}"]`);
+  scanAttribute($, 'role', normalizedMissing, tokens, context, candidates, value => `[role="${value}"]`);
+  scanAttribute($, 'type', normalizedMissing, tokens, context, candidates, value => `[type="${value}"]`);
+  scanAttribute($, 'placeholder', normalizedMissing, tokens, context, candidates, value => `[placeholder="${value}"]`);
   scanClass($, normalizedMissing, tokens, context, candidates);
   scanText($, normalizedMissing, tokens, context, candidates);
+  scanCompositeSelectors($, missingSelector, normalizedMissing, tokens, context, candidates);
 
   const best = candidates.sort((a, b) => {
     const scoreDiff = (b.score + b.contextBonus) - (a.score + a.contextBonus);
@@ -232,6 +236,119 @@ function scanText(
       reason: `text matched "${safeText}"`,
     });
   });
+}
+
+function scanCompositeSelectors(
+  $: ReturnType<typeof load>,
+  missingSelector: string,
+  normalizedMissing: string,
+  tokens: string[],
+  context: SelectorContext | undefined,
+  candidates: Candidate[]
+): void {
+  const variants = relaxSelectorVariants(missingSelector);
+  const seenSelectors = new Set<string>();
+
+  for (const variant of variants) {
+    let matches: ReturnType<typeof $>;
+    try {
+      matches = $(variant);
+    } catch {
+      continue;
+    }
+
+    matches.each((_, el) => {
+      const stable = deriveStableSelectorForElement($, el as never);
+      if (!stable) return;
+      if (seenSelectors.has(stable.selector)) return;
+      seenSelectors.add(stable.selector);
+
+      const metadata = getElementMetadata($, el);
+      const similarity = Math.max(
+        scoreMatch(variant, normalizedMissing, tokens),
+        scoreMatch(stable.selector, normalizedMissing, tokens)
+      );
+      if (similarity <= 0) return;
+
+      candidates.push({
+        selector: stable.selector,
+        score: similarity + stable.bonus,
+        contextBonus: computeContextBonus(context, metadata, stable.selector, normalizedMissing, tokens),
+        reason: stable.reason || `matched relaxed selector "${variant}"`,
+      });
+    });
+  }
+}
+
+type StableSelector = { selector: string; bonus: number; reason: string };
+
+function deriveStableSelectorForElement(
+  $: ReturnType<typeof load>,
+  el: ReturnType<typeof $> | Parameters<ReturnType<typeof $>['each']>[0]
+): StableSelector | null {
+  const wrapped = $(el as never);
+  const attrs = wrapped.attr();
+  const classAttr = attrs?.class || '';
+  const classNames = classAttr.split(/\s+/).filter(Boolean);
+
+  const testId = attrs?.['data-testid'];
+  if (testId) return { selector: `[data-testid="${testId}"]`, bonus: 0.12, reason: 'using data-testid' };
+
+  const id = attrs?.id;
+  if (id) return { selector: `#${id}`, bonus: 0.1, reason: 'using id' };
+
+  const name = attrs?.name;
+  if (name) return { selector: `[name="${name}"]`, bonus: 0.08, reason: 'using name attribute' };
+
+  const ariaLabel = attrs?.['aria-label'];
+  if (ariaLabel) return { selector: `[aria-label="${ariaLabel}"]`, bonus: 0.06, reason: 'using aria-label' };
+
+  if (classNames.length > 0) {
+    const combo = buildClassSelector(classNames, 2);
+    if (combo) return { selector: combo, bonus: 0.04, reason: 'using class combination' };
+  }
+
+  const text = wrapped.text().trim();
+  if (text) {
+    const safeText = text.replace(/"/g, '\\"').slice(0, 80);
+    const tagName = (wrapped[0] as { tagName?: string; name?: string } | undefined)?.tagName || (wrapped[0] as { name?: string } | undefined)?.name || 'element';
+    return { selector: `${String(tagName)}:has-text("${safeText}")`, bonus: 0.02, reason: 'using visible text' };
+  }
+
+  const tagName = (wrapped[0] as { tagName?: string; name?: string } | undefined)?.tagName || (wrapped[0] as { name?: string } | undefined)?.name;
+  if (tagName) return { selector: String(tagName).toLowerCase(), bonus: 0, reason: 'using tag only' };
+
+  return null;
+}
+
+function buildClassSelector(classNames: string[], limit: number): string | null {
+  const unique = Array.from(new Set(classNames));
+  if (unique.length === 0) return null;
+  const sorted = unique.sort((a, b) => b.length - a.length).slice(0, Math.max(1, limit));
+  return sorted.map(value => `.${value}`).join('');
+}
+
+function relaxSelectorVariants(selector: string): string[] {
+  const variants = new Set<string>();
+  const trimmed = selector.trim();
+  if (!trimmed) return [];
+
+  variants.add(trimmed);
+
+  const withoutPseudo = trimmed
+    .replace(/:nth-[^)]+\([^)]*\)/gi, '')
+    .replace(/:(first-child|last-child|first-of-type|last-of-type|visible|hidden|hover|active|focus|focus-visible)/gi, '')
+    .replace(/::?[a-z0-9_-]+/gi, '');
+
+  const squeezed = withoutPseudo.replace(/\s*([>+~])\s*/g, '$1').replace(/\s+/g, ' ').trim();
+  if (withoutPseudo.trim()) variants.add(withoutPseudo.trim());
+  if (squeezed) variants.add(squeezed);
+
+  const segments = squeezed.split(/[>+~\s]+/).filter(Boolean);
+  const last = segments[segments.length - 1];
+  if (last) variants.add(last);
+
+  return Array.from(variants).filter(Boolean);
 }
 
 function computeContextBonus(

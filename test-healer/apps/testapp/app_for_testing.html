@@ -5,124 +5,472 @@
   <title>AI Test Healer Playground</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    :root {
+      --bg: #f4f6fb;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --primary: #2563eb;
+      --primary-weak: #e2e8f0;
+      --border: #e5e7eb;
+      --success: #16a34a;
+      --warning: #d97706;
+      --danger: #dc2626;
+    }
     body {
-      font-family: system-ui, Arial, sans-serif;
-      background: #f5f5f5;
-      padding: 40px;
+      font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+      background: radial-gradient(circle at 20% 20%, #eef2ff, transparent 35%),
+                  radial-gradient(circle at 80% 0%, #e0f2fe, transparent 35%),
+                  var(--bg);
+      color: var(--text);
+      padding: 32px;
+      margin: 0;
+    }
+    h1 { margin: 0 0 8px; }
+    h2 { margin: 0 0 12px; }
+    p { margin: 8px 0; color: var(--muted); }
+    main {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      align-items: start;
     }
     .card {
-      background: white;
-      padding: 24px;
-      border-radius: 12px;
-      max-width: 420px;
-      margin-bottom: 24px;
-      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+      background: var(--card);
+      padding: 20px;
+      border-radius: 14px;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.06);
+      border: 1px solid var(--border);
+    }
+    label { display: block; margin: 10px 0 4px; font-weight: 600; }
+    input, select, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      box-sizing: border-box;
     }
     button {
-      margin-top: 16px;
-      padding: 10px 16px;
-      border-radius: 8px;
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 10px;
       border: none;
-      background: #2563eb;
+      background: var(--primary);
       color: white;
       cursor: pointer;
+      font-weight: 600;
     }
-    .secondary {
-      background: #6b7280;
+    button.secondary { background: #64748b; }
+    button.ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
     }
-    #login-message {
-      margin-top: 12px;
-      font-weight: bold;
-    }
+    .inline-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    #login-message { margin-top: 10px; font-weight: bold; }
+    .muted { color: var(--muted); font-size: 14px; }
+    ul { padding-left: 18px; }
+    .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: var(--primary-weak); color: var(--primary); font-weight: 600; font-size: 12px; }
+    .grid-two { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+    .list-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+    .list-row:last-child { border-bottom: none; }
+    .badge { padding: 3px 8px; border-radius: 8px; font-size: 12px; }
+    .badge.ok { background: #dcfce7; color: #15803d; }
+    .badge.warn { background: #fef3c7; color: #b45309; }
+    .badge.danger { background: #fee2e2; color: #b91c1c; }
+    .tabs { display: flex; gap: 8px; margin: 12px 0; }
+    .tabs button { margin-top: 0; padding: 8px 12px; border: 1px solid var(--border); background: white; color: var(--muted); }
+    .tabs button.active { background: var(--primary); color: white; border-color: var(--primary); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
     .modal {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.4);
+      background: rgba(0,0,0,0.45);
       align-items: center;
       justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
     }
     .modal-content {
       background: white;
       padding: 20px;
-      border-radius: 10px;
+      border-radius: 12px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.15);
     }
+    .toast {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      background: #0f172a;
+      color: white;
+      padding: 12px 16px;
+      border-radius: 10px;
+      display: none;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.2);
+    }
+    .accordion button {
+      width: 100%;
+      text-align: left;
+      background: #f8fafc;
+      color: var(--text);
+      border: 1px solid var(--border);
+      margin-top: 8px;
+    }
+    .accordion .panel { display: none; padding: 8px 4px; color: var(--muted); }
+    .todo-item { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+    .todo-item.done { text-decoration: line-through; color: var(--muted); }
+    .table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    .table th, .table td { padding: 8px; border: 1px solid var(--border); text-align: left; font-size: 14px; }
+    .table th { background: #f8fafc; }
   </style>
 </head>
 <body>
+  <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;gap:12px;flex-wrap:wrap;">
+    <div>
+      <h1>AI Test Healer Playground</h1>
+      <p class="muted">A richer surface to generate more realistic automated tests.</p>
+    </div>
+    <div class="inline-actions">
+      <button id="theme-toggle" data-testid="theme-toggle" class="ghost">Toggle Theme</button>
+      <button id="open-modal" data-testid="open-modal">Open Modal</button>
+    </div>
+  </header>
 
-  <!-- LOGIN CARD -->
-  <div class="card" id="login-card">
-    <h2>Sign in</h2>
+  <main>
+    <!-- LOGIN CARD -->
+    <div class="card" id="login-card">
+      <div class="inline-actions" style="justify-content:space-between; align-items:center;">
+        <h2>Sign in</h2>
+        <span class="pill" id="login-status-pill">Guest</span>
+      </div>
 
-    <label>Email</label>
-    <input id="email-input" type="email" />
+      <label for="email-input">Email</label>
+      <input id="email-input" data-testid="email" type="email" placeholder="you@example.com" />
 
-    <label>Password</label>
-    <input id="password-input" type="password" />
+      <label for="password-input">Password</label>
+      <input id="password-input" data-testid="password" type="password" placeholder="At least 4 characters" />
 
-    <button id="login-btn" class="login-button">Sign in</button>
+      <label style="display:flex;align-items:center;gap:8px;font-weight:500;">
+        <input type="checkbox" id="remember-me" data-testid="remember-me" style="width:auto;"> Remember me
+      </label>
 
-    <p id="login-message"></p>
-  </div>
+      <button id="login-btn" class="login-btn" data-testid="login-btn">Sign in</button>
+      <p id="login-message" aria-live="polite"></p>
+    </div>
 
-  <!-- SEARCH CARD -->
-  <div class="card" id="search-card">
-    <h2>Movie Search</h2>
-    <input id="search-input" placeholder="Search movie" />
-    <button id="search-btn">Search</button>
+    <!-- SEARCH CARD -->
+    <div class="card" id="search-card">
+      <div class="inline-actions" style="justify-content:space-between; align-items:center;">
+        <h2>Movie Search</h2>
+        <span class="muted" id="search-hint">Type a query and wait</span>
+      </div>
+      <div class="grid-two">
+        <input id="search-input" data-testid="search-input" placeholder="Search movies" />
+        <select id="search-filter" data-testid="search-filter">
+          <option value="all">All</option>
+          <option value="sci-fi">Sci-Fi</option>
+          <option value="drama">Drama</option>
+          <option value="comedy">Comedy</option>
+        </select>
+      </div>
+      <div class="inline-actions">
+        <button id="search-btn" data-testid="search-btn">Search</button>
+        <button id="clear-search" class="ghost" data-testid="clear-search">Clear</button>
+      </div>
+      <ul id="search-results" data-testid="search-results"></ul>
+      <p class="muted" id="search-meta"></p>
+    </div>
 
-    <!-- Deliberately renamed so tests need healing -->
-    <ul id="search-results-list"></ul>
-  </div>
+    <!-- TODO / NOTES -->
+    <div class="card" id="todo-cards">
+      <h2>Todos</h2>
+      <div class="inline-actions">
+        <input id="todo-input" data-testid="todo-input" placeholder="Add a task" />
+        <button id="add-todo" data-testid="add-todo">Add</button>
+      </div>
+      <div id="todo-list" data-testid="todo-list"></div>
+    </div>
+
+    <!-- DATA TABLE & FILTERS -->
+    <div class="card" id="data-card">
+      <h2>Library</h2>
+      <div class="grid-two">
+        <select id="genre-filter" data-testid="genre-filter">
+          <option value="all">All genres</option>
+          <option value="sci-fi">Sci-Fi</option>
+          <option value="drama">Drama</option>
+          <option value="comedy">Comedy</option>
+        </select>
+        <select id="rating-filter" data-testid="rating-filter">
+          <option value="all">Any rating</option>
+          <option value="4">4.0+</option>
+          <option value="4.5">4.5+</option>
+        </select>
+      </div>
+      <table class="table" id="library-table" data-testid="library-table">
+        <thead>
+          <tr><th>Title</th><th>Genre</th><th>Rating</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <!-- TABS / SETTINGS -->
+    <div class="card" id="tabs-card">
+      <h2>Profile Tabs</h2>
+      <div class="tabs" role="tablist">
+        <button class="active" data-tab="overview" data-testid="tab-overview">Overview</button>
+        <button data-tab="activity" data-testid="tab-activity">Activity</button>
+        <button data-tab="settings" data-testid="tab-settings">Settings</button>
+      </div>
+      <div id="tab-overview" class="tab-panel active" data-testid="panel-overview">
+        <p class="muted">Quick stats about the user journey.</p>
+        <ul>
+          <li><strong>Sessions:</strong> <span id="stat-sessions">0</span></li>
+          <li><strong>Last login:</strong> <span id="stat-last-login">Never</span></li>
+        </ul>
+      </div>
+      <div id="tab-activity" class="tab-panel" data-testid="panel-activity">
+        <p class="muted">Recent activity logs.</p>
+        <ul id="activity-feed"></ul>
+      </div>
+      <div id="tab-settings" class="tab-panel" data-testid="panel-settings">
+        <p class="muted">Toggle preferences to test state updates.</p>
+        <label><input type="checkbox" id="setting-emails" data-testid="setting-emails" /> Email alerts</label>
+        <label><input type="checkbox" id="setting-sms" data-testid="setting-sms" /> SMS alerts</label>
+      </div>
+    </div>
+
+    <!-- ACCORDION / FAQ -->
+    <div class="card" id="faq-card">
+      <h2>FAQ</h2>
+      <div class="accordion" id="faq">
+        <button data-panel="faq-a" data-testid="faq-a">What is this app?</button>
+        <div class="panel" id="faq-a">A playground to practice healing flaky tests.</div>
+        <button data-panel="faq-b" data-testid="faq-b">How slow is search?</button>
+        <div class="panel" id="faq-b">Search has a deliberate delay to exercise waits.</div>
+        <button data-panel="faq-c" data-testid="faq-c">Can I reset data?</button>
+        <div class="panel" id="faq-c">Use the Clear buttons on each card.</div>
+      </div>
+    </div>
+  </main>
 
   <!-- MODAL -->
   <div class="modal" id="info-modal">
     <div class="modal-content">
-      <p>This is a modal dialog</p>
-      <button id="close-modal" class="secondary">Close</button>
+      <h3>Modal Dialog</h3>
+      <p>This is a modal dialog with richer content.</p>
+      <ul>
+        <li data-testid="modal-point-1">Contains list items</li>
+        <li data-testid="modal-point-2">Has a close button</li>
+        <li data-testid="modal-point-3">Easy to assert visibility</li>
+      </ul>
+      <button id="close-modal" class="secondary" data-testid="close-modal">Close</button>
     </div>
   </div>
 
-  <button id="open-modal">Open Modal</button>
+  <div class="toast" id="toast" data-testid="toast"></div>
 
   <script>
-    // LOGIN LOGIC (LONGER DELAY)
-    document.querySelector('.login-button').addEventListener('click', () => {
-      const email = document.getElementById('email-input').value;
-      const password = document.getElementById('password-input').value;
+    const loginButton = document.getElementById('login-btn');
+    const loginMessage = document.getElementById('login-message');
+    const loginStatusPill = document.getElementById('login-status-pill');
+    const activityFeed = document.getElementById('activity-feed');
+    const statSessions = document.getElementById('stat-sessions');
+    const statLastLogin = document.getElementById('stat-last-login');
+    let sessionCount = 0;
+
+    loginButton.addEventListener('click', () => {
+      const email = document.getElementById('email-input').value.trim();
+      const password = document.getElementById('password-input').value.trim();
+      const remember = document.getElementById('remember-me').checked;
+
+      loginMessage.textContent = 'Checking credentials...';
+      loginMessage.style.color = '#0f172a';
 
       setTimeout(() => {
-        if (email === 'test@test.com' && password === '1234') {
-          document.getElementById('login-message').textContent = 'Login successful';
+        const ok = email === 'test@test.com' && password === '1234';
+        if (ok) {
+          sessionCount += 1;
+          loginMessage.textContent = 'Login successful';
+          loginMessage.style.color = '#15803d';
+          loginStatusPill.textContent = remember ? 'Remembered' : 'Signed in';
+          statSessions.textContent = String(sessionCount);
+          const now = new Date().toLocaleTimeString();
+          statLastLogin.textContent = now;
+          prependActivity(`Logged in as ${email}`);
+          showToast('Signed in successfully');
         } else {
-          document.getElementById('login-message').textContent = 'Invalid credentials';
+          loginMessage.textContent = 'Invalid credentials';
+          loginMessage.style.color = '#b91c1c';
+          prependActivity('Failed login attempt');
         }
-      }, 2000); // increased delay
+      }, 900);
     });
 
     // SEARCH LOGIC
-    document.getElementById('search-btn').addEventListener('click', () => {
-      const query = document.getElementById('search-input').value;
-      const results = document.getElementById('search-results-list');
-      results.innerHTML = '';
+    const movies = [
+      { title: 'Matrix', genre: 'sci-fi', rating: 4.8 },
+      { title: 'Arrival', genre: 'sci-fi', rating: 4.6 },
+      { title: 'The Office', genre: 'comedy', rating: 4.5 },
+      { title: 'The Godfather', genre: 'drama', rating: 4.9 },
+      { title: 'Interstellar', genre: 'sci-fi', rating: 4.7 },
+      { title: 'Superbad', genre: 'comedy', rating: 4.2 },
+      { title: 'The Whale', genre: 'drama', rating: 4.1 },
+    ];
 
-      const status = document.createElement('li');
-      status.textContent = 'Loading (simulated slow search)...';
-      results.appendChild(status);
+    const searchBtn = document.getElementById('search-btn');
+    const clearSearchBtn = document.getElementById('clear-search');
+    const searchResults = document.getElementById('search-results');
+    const searchHint = document.getElementById('search-hint');
+    const searchMeta = document.getElementById('search-meta');
 
-      // Intentionally slow to trigger timeout in tests before healing.
+    function renderSearchResults(query, filter) {
+      searchResults.innerHTML = '';
+      const loading = document.createElement('li');
+      loading.textContent = 'Loading (simulated delay)...';
+      searchResults.appendChild(loading);
+
       setTimeout(() => {
-        results.innerHTML = '';
-        if (query) {
-          const li = document.createElement('li');
-          li.textContent = `Result for "${query}"`;
-          results.appendChild(li);
+        searchResults.innerHTML = '';
+        const normalized = query.trim().toLowerCase();
+        const matched = movies.filter(m => {
+          const genreOk = filter === 'all' || m.genre === filter;
+          const textOk = !normalized || m.title.toLowerCase().includes(normalized);
+          return genreOk && textOk;
+        });
+
+        if (matched.length === 0) {
+          const empty = document.createElement('li');
+          empty.textContent = 'No results found';
+          searchResults.appendChild(empty);
+          searchMeta.textContent = '0 matches';
+          return;
         }
-      }, 7000);
+
+        matched.forEach(item => {
+          const li = document.createElement('li');
+          li.textContent = `Found: ${item.title} (${item.genre})`;
+          li.dataset.genre = item.genre;
+          searchResults.appendChild(li);
+        });
+        searchMeta.textContent = `${matched.length} match(es)`;
+      }, 1200);
+    }
+
+    searchBtn.addEventListener('click', () => {
+      const query = document.getElementById('search-input').value;
+      const filter = document.getElementById('search-filter').value;
+      searchHint.textContent = 'Searching...';
+      renderSearchResults(query, filter);
     });
 
-    // MODAL LOGIC
+    clearSearchBtn.addEventListener('click', () => {
+      document.getElementById('search-input').value = '';
+      searchResults.innerHTML = '';
+      searchMeta.textContent = '';
+      searchHint.textContent = 'Type a query and wait';
+    });
+
+    // TODO LOGIC
+    const todoInput = document.getElementById('todo-input');
+    const addTodoBtn = document.getElementById('add-todo');
+    const todoList = document.getElementById('todo-list');
+
+    function renderTodo(text, done = false) {
+      const row = document.createElement('div');
+      row.className = `todo-item ${done ? 'done' : ''}`;
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = done;
+      const label = document.createElement('span');
+      label.textContent = text;
+      const remove = document.createElement('button');
+      remove.textContent = 'Remove';
+      remove.className = 'ghost';
+      remove.style.marginTop = '0';
+
+      checkbox.addEventListener('change', () => {
+        row.classList.toggle('done', checkbox.checked);
+      });
+      remove.addEventListener('click', () => row.remove());
+
+      row.append(checkbox, label, remove);
+      todoList.appendChild(row);
+    }
+
+    renderTodo('Write an end-to-end test', true);
+    renderTodo('Heal flaky selector', false);
+
+    addTodoBtn.addEventListener('click', () => {
+      const value = todoInput.value.trim();
+      if (!value) return;
+      renderTodo(value, false);
+      todoInput.value = '';
+    });
+
+    // DATA TABLE
+    const libraryRows = [
+      { title: 'Matrix', genre: 'sci-fi', rating: 4.8 },
+      { title: 'Finding Nemo', genre: 'comedy', rating: 4.3 },
+      { title: 'Oppenheimer', genre: 'drama', rating: 4.7 },
+      { title: 'Back to the Future', genre: 'sci-fi', rating: 4.6 },
+      { title: 'Soul', genre: 'comedy', rating: 4.5 },
+    ];
+
+    const genreFilter = document.getElementById('genre-filter');
+    const ratingFilter = document.getElementById('rating-filter');
+    const libraryTableBody = document.querySelector('#library-table tbody');
+
+    function renderTable() {
+      libraryTableBody.innerHTML = '';
+      const minRating = parseFloat(ratingFilter.value) || 0;
+      const genre = genreFilter.value;
+
+      libraryRows
+        .filter(row => (genre === 'all' || row.genre === genre) && row.rating >= minRating)
+        .forEach(row => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${row.title}</td><td>${row.genre}</td><td>${row.rating.toFixed(1)}</td>`;
+          libraryTableBody.appendChild(tr);
+        });
+    }
+
+    genreFilter.addEventListener('change', renderTable);
+    ratingFilter.addEventListener('change', renderTable);
+    renderTable();
+
+    // TABS
+    const tabs = document.querySelectorAll('.tabs button');
+    tabs.forEach(btn => {
+      btn.addEventListener('click', () => {
+        tabs.forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+
+        btn.classList.add('active');
+        const target = document.getElementById(`tab-${btn.dataset.tab}`);
+        if (target) target.classList.add('active');
+      });
+    });
+
+    // FAQ ACCORDION
+    document.querySelectorAll('.accordion button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const panelId = btn.dataset.panel;
+        const panel = panelId ? document.getElementById(panelId) : null;
+        if (!panel) return;
+        const open = panel.style.display === 'block';
+        document.querySelectorAll('.accordion .panel').forEach(p => (p.style.display = 'none'));
+        panel.style.display = open ? 'none' : 'block';
+      });
+    });
+
+    // MODAL
     document.getElementById('open-modal').addEventListener('click', () => {
       document.getElementById('info-modal').style.display = 'flex';
     });
@@ -130,6 +478,36 @@
     document.getElementById('close-modal').addEventListener('click', () => {
       document.getElementById('info-modal').style.display = 'none';
     });
+
+    // THEME TOGGLE
+    document.getElementById('theme-toggle').addEventListener('click', () => {
+      const isDark = document.body.dataset.theme === 'dark';
+      document.body.dataset.theme = isDark ? 'light' : 'dark';
+      if (isDark) {
+        document.documentElement.style.setProperty('--bg', '#f4f6fb');
+        document.documentElement.style.setProperty('--text', '#0f172a');
+        document.documentElement.style.setProperty('--card', '#ffffff');
+      } else {
+        document.documentElement.style.setProperty('--bg', '#0f172a');
+        document.documentElement.style.setProperty('--text', '#e2e8f0');
+        document.documentElement.style.setProperty('--card', '#1f2937');
+      }
+    });
+
+    // TOAST
+    const toast = document.getElementById('toast');
+    function showToast(message) {
+      toast.textContent = message;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 2000);
+    }
+
+    // Activity helper
+    function prependActivity(text) {
+      const li = document.createElement('li');
+      li.textContent = `${new Date().toLocaleTimeString()}: ${text}`;
+      activityFeed.prepend(li);
+    }
   </script>
 
 </body>

@@ -66,7 +66,7 @@ function runClassifier(): void {
         if (!fs.existsSync(errorFile)) continue;
 
         const slug = slugify(run.replace(/^app-AI-Test-Healer-Playground-/, ''));
-        const cached = cachedBySlug.get(slug);
+        const cached = resolveCachedClassification(cachedBySlug, slug);
         const classification = cached ?? classifyFailure(fs.readFileSync(errorFile, 'utf-8'), run);
         const outputPath = path.join(runDir, 'classification.json');
         fs.writeFileSync(outputPath, JSON.stringify(classification, null, 2));
@@ -89,6 +89,7 @@ function runClassifier(): void {
         const classification = classifyFailure(errorText, hint);
         const domPath = path.join(runDir, 'dom.html');
         const testSourcePath = path.join(runDir, 'test-source.js');
+        const runSlug = slugify(run.replace(/^app-AI-Test-Healer-Playground-/, ''));
 
         let missingSelectors = extractMissingSelectors(errorText);
         let inferredContexts: MissingSelectorContext[] = [];
@@ -153,6 +154,7 @@ function runClassifier(): void {
         }
 
         cachedBySlug.set(slugify(classification.testName), classification);
+        cachedBySlug.set(runSlug, classification);
 
         const outputPath = path.join(runDir, 'classification.json');
         fs.writeFileSync(outputPath, JSON.stringify(classification, null, 2));
@@ -195,4 +197,19 @@ function slugify(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+function resolveCachedClassification(
+  cache: Map<string, ReturnType<typeof classifyFailure>>,
+  slug: string,
+): ReturnType<typeof classifyFailure> | undefined {
+  if (cache.has(slug)) return cache.get(slug);
+
+  const parts = slug.split('-').filter(Boolean);
+  for (let i = 1; i < parts.length; i += 1) {
+    const alt = parts.slice(i).join('-');
+    if (cache.has(alt)) return cache.get(alt);
+  }
+
+  return undefined;
 }
