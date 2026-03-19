@@ -11,7 +11,7 @@ type Healing = {
 type Classification = {
   failureType?: string;
   healing?: Healing;
-  timeoutFix?: { timeoutMs: number; reason?: string };
+  timeoutFix?: { timeoutMs: number; reason?: string; testFile?: string };
   testName?: string;
   [key: string]: unknown;
 };
@@ -21,6 +21,15 @@ type Suggestion = {
   to: string;
   confidence: number;
   sourceFile: string; // classification.json path
+};
+
+type ClassificationSource = 'test-results' | 'failures';
+
+type ClassificationFileMeta = {
+  file: string;
+  source: ClassificationSource;
+  runKey: string;
+  timestamp?: string;
 };
 
 type HealerConfig = {
@@ -54,11 +63,6 @@ const minConfidence = minConfidenceArg
 
 const scope = scopeArg ? scopeArg.split('=')[1] : config.healing.defaultScope;
 const applyRoot = path.isAbsolute(scope) ? scope : path.resolve(projectRoot, scope);
-
-const classificationDirs = [
-  path.resolve(projectRoot, config.artifacts.testResultsDir),
-  path.resolve(projectRoot, config.artifacts.failuresDir),
-];
 
 const codeFileExtensions = new Set(['.ts', '.tsx', '.js', '.jsx']);
 const excludeDirs = new Set(['node_modules', 'failures', 'test-results', 'artifacts']);
@@ -110,43 +114,99 @@ function* walk(dir: string): Generator<string> {
   }
 }
 
-function collectSuggestions(): Suggestion[] {
+function getRunMetaFromClassificationFile(file: string): { runKey: string; timestamp?: string } {
+  const runDir = path.basename(path.dirname(file));
+  const match = runDir.match(/^(.*)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)$/);
+  if (!match) {
+    return { runKey: runDir };
+  }
+
+  return { runKey: match[1], timestamp: match[2] };
+}
+
+function listClassificationFiles(root: string, source: ClassificationSource): ClassificationFileMeta[] {
+  const files: ClassificationFileMeta[] = [];
+  if (!fs.existsSync(root)) return files;
+
+  for (const file of walk(root)) {
+    if (!file.endsWith('classification.json')) continue;
+    const meta = getRunMetaFromClassificationFile(file);
+    files.push({ file, source, runKey: meta.runKey, timestamp: meta.timestamp });
+  }
+
+  return files;
+}
+
+function selectClassificationFiles(): { files: string[]; sourceLabel: string } {
+  const testResultsRoot = path.resolve(projectRoot, config.artifacts.testResultsDir);
+  const failuresRoot = path.resolve(projectRoot, config.artifacts.failuresDir);
+
+  const testResultFiles = listClassificationFiles(testResultsRoot, 'test-results');
+  if (testResultFiles.length > 0) {
+    return {
+      files: testResultFiles.map(item => item.file),
+      sourceLabel: 'test-results (latest run)',
+    };
+  }
+
+  const failureFiles = listClassificationFiles(failuresRoot, 'failures');
+  const latestByRunKey = new Map<string, ClassificationFileMeta>();
+
+  for (const item of failureFiles) {
+    const prev = latestByRunKey.get(item.runKey);
+    if (!prev) {
+      latestByRunKey.set(item.runKey, item);
+      continue;
+    }
+
+    if (item.timestamp && prev.timestamp) {
+      if (item.timestamp > prev.timestamp) latestByRunKey.set(item.runKey, item);
+      continue;
+    }
+
+    const itemMtime = fs.statSync(item.file).mtimeMs;
+    const prevMtime = fs.statSync(prev.file).mtimeMs;
+    if (itemMtime > prevMtime) latestByRunKey.set(item.runKey, item);
+  }
+
+  return {
+    files: Array.from(latestByRunKey.values()).map(item => item.file),
+    sourceLabel: 'failures (latest per test)',
+  };
+}
+
+function collectSuggestions(): { suggestions: Suggestion[]; timeoutTargets: Map<string, number>; sourceLabel: string } {
   const suggestions: Suggestion[] = [];
+  const timeoutTargets = new Map<string, number>();
+  const selected = selectClassificationFiles();
 
-  const timeoutFixes: Array<{ timeoutMs: number; sourceFile: string }> = [];
+  for (const file of selected.files) {
+    const json = readJsonSafe<Classification>(file);
+    if (!json) continue;
 
-  for (const root of classificationDirs) {
-    for (const file of walk(root)) {
-      if (!file.endsWith('classification.json')) continue;
-      const json = readJsonSafe<Classification>(file);
-      if (!json) continue;
-
-      if (json.timeoutFix?.timeoutMs) {
-        timeoutFixes.push({ timeoutMs: json.timeoutFix.timeoutMs, sourceFile: file });
+    if (json.timeoutFix?.timeoutMs) {
+      const testFile = json.timeoutFix.testFile;
+      if (testFile) {
+        const prev = timeoutTargets.get(testFile) ?? 0;
+        timeoutTargets.set(testFile, Math.max(prev, json.timeoutFix.timeoutMs));
       }
+    }
 
-      if (json.healing) {
-        const { originalSelector, suggestedSelector, confidence } = json.healing;
-        if (!originalSelector || !suggestedSelector) continue;
-        if (confidence < minConfidence) continue;
+    if (json.healing) {
+      const { originalSelector, suggestedSelector, confidence } = json.healing;
+      if (!originalSelector || !suggestedSelector) continue;
+      if (confidence < minConfidence) continue;
 
-        suggestions.push({
-          from: originalSelector,
-          to: suggestedSelector,
-          confidence,
-          sourceFile: file,
-        });
-      }
+      suggestions.push({
+        from: originalSelector,
+        to: suggestedSelector,
+        confidence,
+        sourceFile: file,
+      });
     }
   }
 
-  // If any timeout fixes exist, store the max timeout as a synthetic suggestion keyed by empty selector.
-  if (timeoutFixes.length) {
-    const maxTimeout = Math.max(...timeoutFixes.map(t => t.timeoutMs));
-    (suggestions as any).timeoutFixMs = maxTimeout;
-  }
-
-  return suggestions;
+  return { suggestions, timeoutTargets, sourceLabel: selected.sourceLabel };
 }
 
 function findCodeFiles(root: string): string[] {
@@ -178,7 +238,22 @@ function applyToFile(file: string, from: string, to: string): { changed: boolean
 
   for (const rx of regexes) {
     const before = content;
-    content = content.replace(rx, (_m, p1, p2) => `${p1}${to}${p2}`);
+    content = content.replace(rx, (...args: unknown[]) => {
+      const fullMatch = String(args[0] ?? '');
+      const captures = args.slice(1, -2).map(value => String(value ?? ''));
+
+      if (captures.length === 0) return fullMatch;
+
+      // Generic quoted fallback has one capture (quote char), keep matching quote on both sides.
+      if (captures.length === 1) {
+        const quote = captures[0];
+        return `${quote}${to}${quote}`;
+      }
+
+      const prefix = captures[0];
+      const suffix = captures[captures.length - 1];
+      return `${prefix}${to}${suffix}`;
+    });
     if (content !== before) {
       const beforeCount = (before.match(rx) || []).length;
       const afterCount = (content.match(rx) || []).length;
@@ -195,16 +270,25 @@ function applyToFile(file: string, from: string, to: string): { changed: boolean
   return { changed, changes: totalChanges };
 }
 
+function formatPathForLog(filePath: string): string {
+  const rel = path.relative(projectRoot, filePath);
+  if (!rel || rel.startsWith('..')) {
+    return filePath.split(path.sep).join('/');
+  }
+  return rel.split(path.sep).join('/');
+}
+
 function main(): void {
+  console.log(`[applyHealing] mode=${isDryRun ? 'dry-run' : 'apply'}`);
   console.log(`[applyHealing] root=${projectRoot}`);
   console.log(`[applyHealing] scope=${applyRoot}`);
-  console.log(`[applyHealing] minConfidence=${minConfidence} dryRun=${isDryRun}`);
+  console.log(`[applyHealing] minConfidence=${minConfidence}`);
 
-  const suggestions = collectSuggestions();
-  const timeoutFixMs = (suggestions as any).timeoutFixMs as number | undefined;
-  if (suggestions.length === 0) {
+  const { suggestions, timeoutTargets, sourceLabel } = collectSuggestions();
+  console.log(`[applyHealing] artifacts=${sourceLabel}`);
+  if (suggestions.length === 0 && timeoutTargets.size === 0) {
     console.log('No applicable healing suggestions found.');
-    if (!timeoutFixMs) return;
+    return;
   }
 
   const bestByFrom = new Map<string, Suggestion>();
@@ -214,49 +298,150 @@ function main(): void {
   }
 
   const codeFiles = findCodeFiles(applyRoot);
+
+    // Drop suggestions where "from" is already the target of another suggestion.
+    // If we're healing something TO "#open-modal", then "#open-modal" is the
+    // correct selector – don't try to heal FROM "#open-modal" again.
+    const allTargets = new Set(Array.from(bestByFrom.values()).map(s => s.to));
+    for (const [from] of bestByFrom) {
+      if (allTargets.has(from)) {
+        bestByFrom.delete(from);
+      }
+    }
+
   console.log(`Scanning ${codeFiles.length} code files...`);
 
-  let totalFilesChanged = 0;
+  const changedFiles = new Set<string>();
   let totalReplacements = 0;
+  const selectorSummary: Array<{
+    from: string;
+    to: string;
+    confidence: number;
+    changedFiles: string[];
+    replacements: number;
+    skippedSameSelector?: boolean;
+  }> = [];
 
   for (const suggestion of bestByFrom.values()) {
     if (suggestion.from === suggestion.to) {
-      console.log(`Skip (same selector): "${suggestion.from}" from ${suggestion.sourceFile}`);
+      selectorSummary.push({
+        from: suggestion.from,
+        to: suggestion.to,
+        confidence: suggestion.confidence,
+        changedFiles: [],
+        replacements: 0,
+        skippedSameSelector: true,
+      });
       continue;
     }
 
-    console.log(`Applying: "${suggestion.from}" -> "${suggestion.to}" (confidence ${suggestion.confidence})`);
+    const filesChangedForSuggestion: string[] = [];
+    let replacementsForSuggestion = 0;
+
     for (const file of codeFiles) {
       const { changed, changes } = applyToFile(file, suggestion.from, suggestion.to);
       if (changed) {
-        totalFilesChanged += 1;
+        changedFiles.add(file);
         totalReplacements += changes;
-        console.log(`  ✔ ${file} (${changes} replacement${changes !== 1 ? 's' : ''})`);
+        replacementsForSuggestion += changes;
+        filesChangedForSuggestion.push(file);
       }
+    }
+
+    selectorSummary.push({
+      from: suggestion.from,
+      to: suggestion.to,
+      confidence: suggestion.confidence,
+      changedFiles: filesChangedForSuggestion,
+      replacements: replacementsForSuggestion,
+    });
+  }
+
+  console.log('\nSelector healing summary:');
+  for (const item of selectorSummary) {
+    const selectorLabel = `"${item.from}" -> "${item.to}"`;
+    if (item.skippedSameSelector) {
+      console.log(`  - Skipped ${selectorLabel} (already the same selector).`);
+      continue;
+    }
+
+    if (item.changedFiles.length === 0) {
+      console.log(`  - ${selectorLabel} (confidence ${item.confidence}): no matches found in current scope.`);
+      continue;
+    }
+
+    const fileCount = item.changedFiles.length;
+    const replacementLabel = `${item.replacements} replacement${item.replacements !== 1 ? 's' : ''}`;
+    const fileLabel = `${fileCount} file${fileCount !== 1 ? 's' : ''}`;
+    const formattedFiles = item.changedFiles.map(formatPathForLog).join(', ');
+    console.log(`  - ${selectorLabel} (confidence ${item.confidence}): ${replacementLabel} in ${fileLabel}.`);
+    console.log(`    Files: ${formattedFiles}`);
+  }
+
+  let timeoutChanges: { filesChanged: number; changedFilePaths: string[] } = {
+    filesChanged: 0,
+    changedFilePaths: [],
+  };
+  if (timeoutTargets.size) {
+    timeoutChanges = applyTimeoutFixes(timeoutTargets);
+    for (const filePath of timeoutChanges.changedFilePaths) {
+      changedFiles.add(filePath);
     }
   }
 
-  console.log(`Done. Files changed: ${totalFilesChanged}, total replacements: ${totalReplacements}`);
-  if (timeoutFixMs) {
-    const timeoutChanges = applyTimeoutFixes(codeFiles, timeoutFixMs);
-    totalFilesChanged += timeoutChanges.filesChanged;
-    console.log(`Timeout fixes applied to ${timeoutChanges.filesChanged} files (timeout ${timeoutFixMs} ms)`);
+  console.log('\nTimeout healing summary:');
+  if (timeoutTargets.size === 0) {
+    console.log('  - No timeout updates were suggested.');
+  } else if (timeoutChanges.filesChanged === 0) {
+    console.log(`  - Timeout updates were suggested for ${timeoutTargets.size} test target(s), but no code changes were needed.`);
+  } else {
+    const formattedTimeoutFiles = timeoutChanges.changedFilePaths.map(formatPathForLog).join(', ');
+    console.log(`  - Updated timeout settings in ${timeoutChanges.filesChanged} file${timeoutChanges.filesChanged !== 1 ? 's' : ''}.`);
+    console.log(`    Files: ${formattedTimeoutFiles}`);
   }
+
+  console.log(`\nSummary: ${changedFiles.size} file${changedFiles.size !== 1 ? 's' : ''} affected, ${totalReplacements} selector replacement${totalReplacements !== 1 ? 's' : ''}.`);
   if (isDryRun) {
-    console.log('Dry-run mode: no files were written. Re-run without --dry-run to apply changes.');
+    console.log('Dry-run mode: no files were written. Run `npm run heal:apply` to apply these changes.');
   } else {
     console.log('Backups (*.bak) created next to modified files.');
   }
 }
 
-function applyTimeoutFixes(files: string[], timeoutMs: number): { filesChanged: number } {
+function applyTimeoutFixes(timeoutTargets: Map<string, number>): { filesChanged: number; changedFilePaths: string[] } {
   let filesChanged = 0;
+  const changedFilePaths: string[] = [];
 
-  for (const file of files) {
-    let content = fs.readFileSync(file, 'utf8');
+  for (const [testFile, timeoutMs] of timeoutTargets.entries()) {
+    if (!testFile) continue;
+    const filePath = path.isAbsolute(testFile)
+      ? testFile
+      : path.resolve(projectRoot, testFile);
+
+    // Only touch spec/test files inside the apply scope
+    const isSpec = /\.spec\.(t|j)sx?$/i.test(filePath) || /\.test\.(t|j)sx?$/i.test(filePath);
+    if (!isSpec) continue;
+    if (!filePath.startsWith(applyRoot)) continue;
+    const ext = path.extname(filePath).toLowerCase();
+    if (!codeFileExtensions.has(ext)) continue;
+
+    if (!fs.existsSync(filePath)) continue;
+
+    let content = fs.readFileSync(filePath, 'utf8');
     let changed = false;
 
-    if (!/test\.setTimeout\s*\(/.test(content)) {
+    const hasAnyTestTimeout = /test\.setTimeout\s*\(/.test(content);
+    const testTimeoutRx = /test\.setTimeout\s*\(\s*(\d+)\s*\)/g;
+    content = content.replace(testTimeoutRx, (_m, rawMs) => {
+      const currentMs = Number(rawMs);
+      if (Number.isFinite(currentMs) && currentMs < timeoutMs) {
+        changed = true;
+        return `test.setTimeout(${timeoutMs})`;
+      }
+      return _m;
+    });
+
+    if (!hasAnyTestTimeout) {
       const lines = content.split(/\r?\n/);
       let insertAt = 0;
       while (insertAt < lines.length && /^import\s/.test(lines[insertAt])) insertAt += 1;
@@ -265,23 +450,34 @@ function applyTimeoutFixes(files: string[], timeoutMs: number): { filesChanged: 
       changed = true;
     }
 
-    // Add timeout option to simple toHaveText/toContainText calls without options
     const expectRx = /to(Have|Contain)Text\(([^,()]+)\)/g;
     if (expectRx.test(content)) {
       content = content.replace(expectRx, (_m, kind, arg1) => `to${kind}Text(${arg1}, { timeout: ${timeoutMs} })`);
       changed = true;
     }
 
+    const expectTimeoutRx = /to(Have|Contain)Text\(([^)]*?)\{\s*timeout\s*:\s*(\d+)\s*\}\s*\)/g;
+    content = content.replace(expectTimeoutRx, (match, kind, prefix, rawMs) => {
+      const currentMs = Number(rawMs);
+      if (!Number.isFinite(currentMs) || currentMs >= timeoutMs) return match;
+
+      changed = true;
+      const normalizedPrefix = String(prefix).replace(/\s*,\s*$/, '');
+      return `to${kind}Text(${normalizedPrefix}, { timeout: ${timeoutMs} })`;
+    });
+
     if (changed && !isDryRun) {
-      fs.writeFileSync(`${file}.bak`, content);
-      fs.writeFileSync(file, content, 'utf8');
+      fs.writeFileSync(`${filePath}.bak`, content);
+      fs.writeFileSync(filePath, content, 'utf8');
       filesChanged += 1;
+      changedFilePaths.push(filePath);
     } else if (changed) {
       filesChanged += 1;
+      changedFilePaths.push(filePath);
     }
   }
 
-  return { filesChanged };
+  return { filesChanged, changedFilePaths };
 }
 
 main();

@@ -1,21 +1,23 @@
 import { test, expect } from '@playwright/test';
 import { captureFailure } from './hooks/failureCapture';
 
+test.setTimeout(60000)
+
 test.afterEach(async ({ page }, testInfo) => {
   await captureFailure(page, testInfo);
 });
 
-  test.describe('AI Test Healer Playground', () => {
-    test('successful login', async ({ page }) => {
-      await page.goto('/app_for_testing.html');
+test.describe('AI Test Healer Playground', () => {
+  test('successful login', async ({ page }) => {
+    await page.goto('/app_for_testing.html');
 
-      await page.fill('#email-input', 'test@test.com');
-      await page.fill('#password-input', '1234');
+    await page.fill('#email-input', 'test@test.com');
+    await page.fill('#password-input', '1234');
 
-      await page.click('#login-btn');
+    await page.click('#login-btn');
 
-      await expect(page.locator('#login-message')).toHaveText('Login successful');
-    });
+    await expect(page.locator('#login-message')).toHaveText('Login successful', { timeout: 15000 });
+  });
 
   test('failed login shows error', async ({ page }) => {
     await page.goto('/app_for_testing.html');
@@ -25,24 +27,28 @@ test.afterEach(async ({ page }, testInfo) => {
 
     await page.click('#login-btn');
 
-    await expect(page.locator('#login-message')).toHaveText('Invalid credentials');
+    await expect(page.locator('#login-message')).toHaveText('Invalid credentials', { timeout: 15000 });
   });
 
   test('search returns results', async ({ page }) => {
+
     await page.goto('/app_for_testing.html');
 
     await page.fill('#search-input', 'Matrix');
     await page.click('#search-btn');
 
-    await expect(page.locator('#search-results-list')).toContainText('Result for "Matrix"');
+    await expect(page.locator('#search-results-list')).toContainText('Result for "Matrix"', { timeout: 15000 });
   });
 
   test('modal opens and closes', async ({ page }) => {
+    // Intentional failure: wrong selector to trigger healer suggestion
+    test.setTimeout(15000);
+
     await page.goto('/app_for_testing.html');
 
     await page.click('#open-modal');
 
-    const modal = page.locator('#info-modal');
+    const modal = page.locator('#info');
     await expect(modal).toBeVisible();
 
     await page.click('#close-modal');

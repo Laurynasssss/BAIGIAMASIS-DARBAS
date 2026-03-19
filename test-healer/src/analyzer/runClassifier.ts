@@ -1,7 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 import { classifyFailure } from './classifyFailure';
-import { extractMissingSelectors, findNewSelector } from '../healer/selectorHealing';
+import {
+  extractMissingSelectors,
+  findNewSelector,
+  inferMissingSelectorContextsFromTestSource,
+  type MissingSelectorContext,
+} from '../healer/selectorHealing';
 
 type HealerConfig = {
   artifacts: {
@@ -71,7 +76,7 @@ function runClassifier(): void {
         const errorFile = path.join(runDir, 'error.json');
         if (!fs.existsSync(errorFile)) continue;
 
-        let parsed: { title?: string; error?: string; stack?: string } = {};
+        let parsed: { title?: string; file?: string; error?: string; stack?: string } = {};
         try {
           parsed = JSON.parse(fs.readFileSync(errorFile, 'utf-8'));
         } catch (err) {
@@ -82,29 +87,68 @@ function runClassifier(): void {
         const hint = parsed.title || run;
         const errorText = parsed.error || parsed.stack || '';
         const classification = classifyFailure(errorText, hint);
+        const domPath = path.join(runDir, 'dom.html');
+        const testSourcePath = path.join(runDir, 'test-source.js');
+
+        let missingSelectors = extractMissingSelectors(errorText);
+        let inferredContexts: MissingSelectorContext[] = [];
+
+        if (
+          (classification.failureType === 'TIMEOUT' || classification.failureType === 'UNKNOWN')
+          && missingSelectors.length === 0
+          && fs.existsSync(domPath)
+          && fs.existsSync(testSourcePath)
+        ) {
+          const domHtml = fs.readFileSync(domPath, 'utf-8');
+          const testSource = fs.readFileSync(testSourcePath, 'utf-8');
+          inferredContexts = inferMissingSelectorContextsFromTestSource(
+            testSource,
+            domHtml,
+            parsed.title || classification.testName || hint,
+          );
+          if (inferredContexts.length > 0) {
+            missingSelectors = inferredContexts.map(item => item.selector);
+          }
+        }
+
+        if (classification.failureType === 'UNKNOWN' && missingSelectors.length > 0) {
+          classification.failureType = 'SELECTOR_NOT_FOUND';
+          classification.confidence = Math.max(classification.confidence, 0.72);
+          classification.explanation = 'Likely selector issue inferred from failed test source and captured DOM.';
+          classification.suggestedFix = 'Update/heal the inferred selector, then rerun tests.';
+        }
 
         // If this is a timeout, attach a default healing hint to increase timeouts in tests.
         if (classification.failureType === 'TIMEOUT') {
           (classification as any).timeoutFix = {
             timeoutMs: 15000,
             reason: 'Increase test and expect timeouts for slow UI responses',
+            testFile: parsed.file,
           };
         }
 
-        if (classification.failureType === 'SELECTOR_NOT_FOUND') {
-          const domPath = path.join(runDir, 'dom.html');
-          const missingSelectors = extractMissingSelectors(errorText);
+        const shouldTrySelectorHealing =
+          classification.failureType === 'SELECTOR_NOT_FOUND'
+          || (classification.failureType === 'TIMEOUT' && isLikelySelectorTimeout(errorText, missingSelectors))
+          || ((classification.failureType === 'TIMEOUT' || classification.failureType === 'UNKNOWN') && inferredContexts.length > 0);
 
+        if (shouldTrySelectorHealing) {
           if (missingSelectors.length && fs.existsSync(domPath)) {
             const domHtml = fs.readFileSync(domPath, 'utf-8');
 
             for (const selector of missingSelectors) {
-              const healing = findNewSelector(domHtml, selector);
-              if (healing) {
+              const context = inferredContexts.find(item => item.selector === selector)?.context;
+              const healing = findNewSelector(domHtml, selector, context);
+              if (healing && healing.suggestedSelector !== selector) {
                 classification.healing = healing;
                 break;
               }
             }
+          }
+
+          if (classification.failureType === 'TIMEOUT' && classification.healing) {
+            classification.explanation = 'The timeout likely occurred while waiting for a missing or stale selector.';
+            classification.suggestedFix = 'Update/heal the selector first; if selector is valid but UI is slow, increase timeout.';
           }
         }
 
@@ -125,6 +169,26 @@ function runClassifier(): void {
 }
 
 runClassifier();
+
+function isLikelySelectorTimeout(errorText: string, extractedSelectors: string[]): boolean {
+  if (extractedSelectors.length === 0) return false;
+
+  const text = stripAnsi(errorText || '').toLowerCase();
+  if (!text.includes('timeout')) return false;
+
+  const clickSignal = /\b(click|dblclick|tap)\b/.test(text);
+  const selectorWaitSignal =
+    text.includes('waiting for selector')
+    || text.includes('element(s) not found')
+    || text.includes('resolved to 0 elements')
+    || text.includes('not found');
+
+  return clickSignal || selectorWaitSignal;
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-9;]*m/g, '');
+}
 
 function slugify(value: string): string {
   return value
